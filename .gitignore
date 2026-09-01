@@ -1,0 +1,34 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite
+*.sqlite3
+venv/
+.venv/
+*.egg-info/
+
+# FastAPI uploads (generated, not source)
+backend/uploads/*.pdf
+backend/uploads/*.png
+backend/uploads/*.jpg
+backend/uploads/*.jpeg
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

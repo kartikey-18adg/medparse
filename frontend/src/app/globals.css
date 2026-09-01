@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-workspace: #F7F7F5;
+    --surface-card: #FFFFFF;
+    --surface-subtle: #F2F1EC;
+    --surface-hover: #ECEAE4;
+    --border-subtle: #E2E0D8;
+    --border-strong: #C6C4BA;
+    --text-primary: #1A1917;
+    --text-secondary: #5E5D57;
+    --text-tertiary: #89877E;
+
+    --status-green-text: #1C4D35;
+    --status-green-bg: #EAF5EE;
+    --status-green-border: #B8DFC8;
+
+    --status-amber-text: #855304;
+    --status-amber-bg: #FDF6E4;
+    --status-amber-border: #EBD9A4;
+
+    --status-red-text: #8A1E20;
+    --status-red-bg: #FDF0F0;
+    --status-red-border: #F0C4C4;
+
+    --status-neutral-text: #2B3B4C;
+    --status-neutral-bg: #EDF2F7;
+    --status-neutral-border: #CAD6E2;
+  }
+
+  body {
+    background-color: var(--bg-workspace);
+    color: var(--text-primary);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Tabular figures for medical values, IDs, and financial figures */
+.font-tabular {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Restrained scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F2F1EC;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CFCDBF;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #ABA99C;
+}
