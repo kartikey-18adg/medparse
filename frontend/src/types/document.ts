@@ -1,3 +1,11 @@
+export interface User {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  created_at: string;
+}
+
 export type DocumentCategory = 
   | 'lab_report' 
   | 'medical_bill' 
@@ -15,12 +23,12 @@ export type DocumentStatus =
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
 export interface FieldConfidence {
-  value: string | number;
+  value: string | number | null;
   confidence: number; // 0 - 100
   level: ConfidenceLevel;
   needsReview: boolean;
   isVerified?: boolean;
-  originalValue?: string | number;
+  originalValue?: string | number | null;
   verifiedAt?: string;
   verifiedBy?: string;
 }
@@ -142,6 +150,7 @@ export interface ValidationIssue {
 export interface MedicalDocumentRecord {
   id: string;
   display_id: string; // e.g. LAB-2026-0831
+  user_id?: string;
   filename: string;
   file_size_bytes: number;
   mime_type: string;
@@ -150,11 +159,10 @@ export interface MedicalDocumentRecord {
   overall_confidence: number; // 0 - 100
   upload_timestamp: string;
   last_modified: string;
-  facility_name: string;
-  patient_id_preview: string;
-  patient_name_preview: string;
-  summary_preview: string;
-  is_synthetic_demo: boolean;
+  facility_name: string | null;
+  patient_id_preview: string | null;
+  patient_name_preview: string | null;
+  summary_preview: string | null;
   needs_human_review: boolean;
   unverified_field_count: number;
   extracted_data?: ExtractedStructuredData;
@@ -177,3 +185,4 @@ export interface WorkspaceMetrics {
   verified_count: number;
   claim_ready_count: number;
 }
+

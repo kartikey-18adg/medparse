@@ -89,7 +89,9 @@ export const MetricStrip: React.FC<MetricStripProps> = ({
           <span className="text-xs uppercase tracking-wider font-mono text-[#5E5D57]">
             Avg. Confidence
           </span>
-          <span className="text-[11px] font-mono text-[#1C4D35]">High Band</span>
+          <span className="text-[11px] font-mono text-[#1C4D35]">
+            {metrics.average_confidence >= 90 ? 'High Band' : metrics.average_confidence >= 75 ? 'Med Band' : metrics.average_confidence > 0 ? 'Review Band' : 'Zero State'}
+          </span>
         </div>
         <div className="mt-2 flex items-baseline gap-2">
           <span className="text-2xl font-bold font-tabular text-[#1C4D35]">

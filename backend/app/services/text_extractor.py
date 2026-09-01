@@ -63,7 +63,7 @@ def extract_from_image(file_path: Path) -> Tuple[str, str, int]:
 
 def run_ocr_on_bytes(img_bytes: bytes) -> str:
     """
-    OCR execution layer. Tries pytesseract if available, with robust heuristic fallback.
+    OCR execution layer. Tries pytesseract if available.
     """
     try:
         import pytesseract
@@ -75,5 +75,5 @@ def run_ocr_on_bytes(img_bytes: bytes) -> str:
     except Exception:
         pass
 
-    # Graceful fallback text representation for scanned demo assets
-    return "ST. JUDE MEMORIAL HOSPITAL - CLINICAL INTAKE SCAN\nPATIENT DEMOGRAPHICS EXTRACTED VIA OPTICAL SCANNER"
+    return ""
+

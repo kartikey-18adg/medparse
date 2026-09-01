@@ -13,14 +13,14 @@ export function exportStructuredJson(doc: MedicalDocumentRecord) {
       overall_confidence: doc.overall_confidence,
     },
     patient: {
-      name: doc.patient_name_preview,
-      patient_id: doc.patient_id_preview,
-      facility: doc.facility_name,
+      name: doc.patient_name_preview || 'N/A',
+      patient_id: doc.patient_id_preview || 'N/A',
+      facility: doc.facility_name || 'N/A',
     },
     structured_data: doc.extracted_data,
     verification_audit: {
       status: 'VERIFIED_HUMAN_IN_THE_LOOP',
-      verified_by: 'Dr. K. Patel (Clinical Admin)',
+      verified_by: 'Clinical Operator',
       verified_at: new Date().toISOString(),
     },
   };
@@ -41,6 +41,10 @@ export function exportClaimCsv(doc: MedicalDocumentRecord) {
   // Headers
   csvContent += 'Claim_ID,Document_ID,Category,Patient_Name,Patient_ID,Facility,Date,Service_Or_Test,Code,Quantity,Unit_Rate,Total_Amount,Confidence,Status\n';
 
+  const patientName = doc.patient_name_preview || 'N/A';
+  const patientId = doc.patient_id_preview || 'N/A';
+  const facilityName = doc.facility_name || 'N/A';
+
   if (doc.category === 'medical_bill' && doc.extracted_data && 'line_items' in doc.extracted_data) {
     const data = doc.extracted_data;
     data.line_items.forEach((item) => {
@@ -48,9 +52,9 @@ export function exportClaimCsv(doc: MedicalDocumentRecord) {
         `CLM-${doc.display_id}`,
         doc.display_id,
         doc.category,
-        `"${doc.patient_name_preview}"`,
-        doc.patient_id_preview,
-        `"${doc.facility_name}"`,
+        `"${patientName}"`,
+        patientId,
+        `"${facilityName}"`,
         data.bill_date.value,
         `"${item.description.replace(/"/g, '""')}"`,
         item.code || 'N/A',
@@ -69,9 +73,9 @@ export function exportClaimCsv(doc: MedicalDocumentRecord) {
         `CLM-${doc.display_id}`,
         doc.display_id,
         doc.category,
-        `"${doc.patient_name_preview}"`,
-        doc.patient_id_preview,
-        `"${doc.facility_name}"`,
+        `"${patientName}"`,
+        patientId,
+        `"${facilityName}"`,
         data.date.value,
         `"${test.name.replace(/"/g, '""')}"`,
         'LAB-CPT',
@@ -84,15 +88,16 @@ export function exportClaimCsv(doc: MedicalDocumentRecord) {
       csvContent += row.join(',') + '\n';
     });
   } else {
+    const summary = (doc.summary_preview || '').replace(/"/g, '""');
     const row = [
       `CLM-${doc.display_id}`,
       doc.display_id,
       doc.category,
-      `"${doc.patient_name_preview}"`,
-      doc.patient_id_preview,
-      `"${doc.facility_name}"`,
+      `"${patientName}"`,
+      patientId,
+      `"${facilityName}"`,
       doc.upload_timestamp.substring(0, 10),
-      `"${doc.summary_preview.replace(/"/g, '""')}"`,
+      `"${summary}"`,
       'N/A',
       1,
       0,
@@ -124,8 +129,8 @@ export function exportConsolidatedClaimsBatch(documents: MedicalDocumentRecord[]
       claim_id: `CLM-${doc.display_id}`,
       source_document: doc.filename,
       category: doc.category,
-      patient_name: doc.patient_name_preview,
-      patient_id: doc.patient_id_preview,
+      patient_name: doc.patient_name_preview || 'N/A',
+      patient_id: doc.patient_id_preview || 'N/A',
       structured_data: doc.extracted_data,
       verification_status: 'CERTIFIED',
     })),
@@ -142,6 +147,10 @@ export function exportConsolidatedClaimsBatch(documents: MedicalDocumentRecord[]
 }
 
 export function exportHl7FhirBundle(doc: MedicalDocumentRecord) {
+  const patientIdClean = (doc.patient_id_preview || 'unknown').toLowerCase();
+  const patientNameClean = doc.patient_name_preview || 'N/A';
+  const facilityClean = doc.facility_name || 'N/A';
+
   const fhirBundle = {
     resourceType: 'Bundle',
     id: `bundle-claim-${doc.display_id.toLowerCase()}`,
@@ -153,24 +162,24 @@ export function exportHl7FhirBundle(doc: MedicalDocumentRecord) {
     entry: [
       // 1. Patient Resource
       {
-        fullUrl: `urn:uuid:patient-${doc.patient_id_preview.toLowerCase()}`,
+        fullUrl: `urn:uuid:patient-${patientIdClean}`,
         resource: {
           resourceType: 'Patient',
-          id: doc.patient_id_preview.toLowerCase(),
+          id: patientIdClean,
           identifier: [
             {
               system: 'http://hospital.health.org/mrn',
-              value: doc.patient_id_preview,
+              value: doc.patient_id_preview || 'N/A',
             },
           ],
           name: [
             {
               use: 'official',
-              text: doc.patient_name_preview,
+              text: patientNameClean,
             },
           ],
           managingOrganization: {
-            display: doc.facility_name,
+            display: facilityClean,
           },
         },
       },
@@ -187,8 +196,8 @@ export function exportHl7FhirBundle(doc: MedicalDocumentRecord) {
             display: doc.category.replace('_', ' ').toUpperCase(),
           },
           subject: {
-            reference: `urn:uuid:patient-${doc.patient_id_preview.toLowerCase()}`,
-            display: doc.patient_name_preview,
+            reference: `urn:uuid:patient-${patientIdClean}`,
+            display: patientNameClean,
           },
           period: {
             start: doc.upload_timestamp,
@@ -214,11 +223,11 @@ export function exportHl7FhirBundle(doc: MedicalDocumentRecord) {
           },
           use: 'claim',
           patient: {
-            reference: `urn:uuid:patient-${doc.patient_id_preview.toLowerCase()}`,
-            display: doc.patient_name_preview,
+            reference: `urn:uuid:patient-${patientIdClean}`,
+            display: patientNameClean,
           },
           provider: {
-            display: doc.facility_name,
+            display: facilityClean,
           },
           outcome: 'complete',
           disposition: 'Verified claim-ready dataset generated by MedParse clinical intelligence.',
@@ -236,3 +245,4 @@ export function exportHl7FhirBundle(doc: MedicalDocumentRecord) {
   a.click();
   URL.revokeObjectURL(url);
 }
+

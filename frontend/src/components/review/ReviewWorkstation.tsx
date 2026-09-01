@@ -9,6 +9,7 @@ import { PrescriptionReview } from './PrescriptionReview';
 import { DischargeSummaryReview } from './DischargeSummaryReview';
 import { AuditHistoryDrawer } from './AuditHistoryDrawer';
 import { CodingSuggesterWidget } from './CodingSuggesterWidget';
+import { useAuth } from '@/context/AuthContext';
 import { StatusBadge, CategoryBadge, ConfidenceIndicator } from '@/components/ui/StatusBadge';
 
 interface ReviewWorkstationProps {
@@ -26,10 +27,13 @@ export const ReviewWorkstation: React.FC<ReviewWorkstationProps> = ({
   onReturnToWorkspace,
   onProceedToClaim,
 }) => {
+  const { user } = useAuth();
   const [doc, setDoc] = useState<MedicalDocumentRecord>(initialDoc);
   const [isSavedNotice, setIsSavedNotice] = useState<boolean>(false);
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
   const [isAuditOpen, setIsAuditOpen] = useState<boolean>(false);
+
+  const operatorName = user ? `${user.full_name} (${user.role})` : 'Clinical Operator';
 
   const handleUpdateStructuredData = (updatedData: ExtractedStructuredData) => {
     setDoc((prev) => ({
@@ -59,7 +63,7 @@ export const ReviewWorkstation: React.FC<ReviewWorkstationProps> = ({
         {
           action: 'Human Verification Certified',
           timestamp: new Date().toISOString(),
-          operator: 'Dr. K. Patel (Clinical Admin)',
+          operator: operatorName,
           details: 'All clinical and billing fields verified against source document. Status: READY FOR CLAIM.',
         },
       ],
@@ -68,6 +72,7 @@ export const ReviewWorkstation: React.FC<ReviewWorkstationProps> = ({
     onVerifyRecord(verifiedDoc);
     setIsSavedNotice(true);
   };
+
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F7F5] text-[#1A1917]">
@@ -221,7 +226,7 @@ export const ReviewWorkstation: React.FC<ReviewWorkstationProps> = ({
                     diagnosisText={
                       doc.extracted_data.document_type === 'prescription' || doc.extracted_data.document_type === 'discharge_summary'
                         ? String(doc.extracted_data.diagnosis?.value || '')
-                        : doc.summary_preview
+                        : (doc.summary_preview || '')
                     }
                     procedureText={
                       doc.extracted_data.document_type === 'medical_bill'

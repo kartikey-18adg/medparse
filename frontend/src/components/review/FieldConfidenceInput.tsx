@@ -75,7 +75,7 @@ export const FieldConfidenceInput: React.FC<FieldConfidenceInputProps> = ({
       {multiline ? (
         <textarea
           rows={3}
-          value={field.value}
+          value={field.value ?? ''}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={`w-full px-2.5 py-1.5 text-xs font-sans rounded-[2px] border text-[#1A1917] focus:outline-none focus:bg-[#FFFFFF] transition-colors ${
@@ -87,7 +87,7 @@ export const FieldConfidenceInput: React.FC<FieldConfidenceInputProps> = ({
       ) : (
         <input
           type={type}
-          value={field.value}
+          value={field.value ?? ''}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={`w-full px-2.5 py-1 text-xs font-medium rounded-[2px] border text-[#1A1917] focus:outline-none focus:bg-[#FFFFFF] transition-colors ${

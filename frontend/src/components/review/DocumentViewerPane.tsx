@@ -327,17 +327,17 @@ export const DocumentViewerPane: React.FC<DocumentViewerPaneProps> = ({
             </div>
             <pre className="whitespace-pre-wrap leading-relaxed">
 {`001: ========================================================
-002: ${document.facility_name.toUpperCase()}
+002: ${(document.facility_name || 'CENTRAL CLINICAL FACILITY').toUpperCase()}
 003: CLINICAL OPERATIONS & DIAGNOSTIC SERVICES
 004: DOCUMENT REFERENCE: ${document.display_id}
 005: DATE OF RECORD: ${document.upload_timestamp.substring(0, 10)}
 006: ========================================================
-007: PATIENT NAME: ${document.patient_name_preview}
-008: PATIENT ID:   ${document.patient_id_preview}
+007: PATIENT NAME: ${document.patient_name_preview || 'N/A'}
+008: PATIENT ID:   ${document.patient_id_preview || 'N/A'}
 009: CATEGORY:     ${document.category.toUpperCase()}
 010: --------------------------------------------------------
 011: CLINICAL ATTRIBUTES & LINE DATA:
-012: Summary: ${document.summary_preview}
+012: Summary: ${document.summary_preview || 'N/A'}
 013: Status:  ${document.status.toUpperCase()}
 014: --------------------------------------------------------
 015: [OCR EOF - Checksum verified: Valid Stream]`}

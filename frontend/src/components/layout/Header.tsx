@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useAuth } from '@/context/AuthContext';
 
 interface HeaderProps {
   activeView: string;
@@ -15,6 +16,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenIntake,
   reviewCount,
 }) => {
+  const { user, logout } = useAuth();
+
   return (
     <header className="border-b border-[#E2E0D8] bg-[#FFFFFF] sticky top-0 z-30">
       {/* Top institutional strip */}
@@ -24,14 +27,24 @@ export const Header: React.FC<HeaderProps> = ({
             MedParse Operations System
           </span>
           <span className="text-[#C6C4BA]">|</span>
-          <span>Workspace: Central District Hospital · Claims & Billing</span>
+          <span>
+            {user ? `Operator: ${user.full_name} · ${user.role}` : 'Clinical Document Operations Workspace'}
+          </span>
         </div>
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-[#EAE8DF] border border-[#D5D3C8] text-[#4A4842] font-mono text-[10px] rounded-[2px]">
             <span className="w-1.5 h-1.5 rounded-full bg-[#1C4D35]" />
-            Synthetic Mode Active
+            Live Database · Active Session
           </span>
-          <span className="text-[#89877E] font-mono">Build 2026.09-rc1</span>
+          {user && (
+            <button
+              onClick={logout}
+              title="End operator session"
+              className="text-[#8A1E20] hover:text-[#501011] font-mono text-[10px] uppercase font-semibold px-2 py-0.5 bg-[#FDF0F0] border border-[#F2B8B8] rounded-[2px] transition-colors"
+            >
+              Sign Out [×]
+            </button>
+          )}
         </div>
       </div>
 
@@ -119,3 +132,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+

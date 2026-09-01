@@ -1,33 +1,116 @@
-import { MedicalDocumentRecord, WorkspaceMetrics, DocumentCategory } from '@/types/document';
-import { MOCK_DOCUMENTS, INITIAL_WORKSPACE_METRICS } from '@/data/mockDocuments';
+import { MedicalDocumentRecord, WorkspaceMetrics, DocumentCategory, User, ExtractedStructuredData } from '@/types/document';
 
 const BACKEND_API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+const TOKEN_STORAGE_KEY = 'medparse_access_token';
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
 
 export class MedParseApiClient {
-  private static async fetchWithFallback<T>(
-    endpoint: string,
-    options: RequestInit = {},
-    fallbackData: T
-  ): Promise<T> {
-    try {
-      const res = await fetch(`${BACKEND_API_BASE}${endpoint}`, {
-        ...options,
-        headers: {
-          ...options.headers,
-        },
-      });
+  private static token: string | null = null;
 
-      if (!res.ok) {
-        console.warn(`[MedParse API] ${endpoint} returned ${res.status}, using local fallback.`);
-        return fallbackData;
+  static getToken(): string | null {
+    if (this.token) return this.token;
+    if (typeof window !== 'undefined') {
+      this.token = localStorage.getItem(TOKEN_STORAGE_KEY);
+    }
+    return this.token;
+  }
+
+  static setToken(token: string | null): void {
+    this.token = token;
+    if (typeof window !== 'undefined') {
+      if (token) {
+        localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      } else {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
       }
-
-      return (await res.json()) as T;
-    } catch (err) {
-      // Backend offline or unreachable - gracefully fall back to local dataset
-      return fallbackData;
     }
   }
+
+  private static async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const token = this.getToken();
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string>),
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`${BACKEND_API_BASE}${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    if (res.status === 401) {
+      this.setToken(null);
+      throw new Error('UNAUTHORIZED');
+    }
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: `HTTP error ${res.status}` }));
+      throw new Error(errorData.detail || `Request failed with status ${res.status}`);
+    }
+
+    return (await res.json()) as T;
+  }
+
+  // --- Auth APIs ---
+
+  static async register(email: string, password: string, full_name: string, role: string = 'Clinical Operator'): Promise<AuthResponse> {
+    const res = await fetch(`${BACKEND_API_BASE}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, full_name, role }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(err.detail || 'Registration failed');
+    }
+
+    const data = (await res.json()) as AuthResponse;
+    this.setToken(data.access_token);
+    return data;
+  }
+
+  static async login(email: string, password: string): Promise<AuthResponse> {
+    const res = await fetch(`${BACKEND_API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Invalid credentials' }));
+      throw new Error(err.detail || 'Invalid email or password');
+    }
+
+    const data = (await res.json()) as AuthResponse;
+    this.setToken(data.access_token);
+    return data;
+  }
+
+  static async getCurrentUser(): Promise<User | null> {
+    const token = this.getToken();
+    if (!token) return null;
+    try {
+      return await this.request<User>('/api/auth/me', { method: 'GET' });
+    } catch {
+      this.setToken(null);
+      return null;
+    }
+  }
+
+  static logout(): void {
+    this.setToken(null);
+  }
+
+  // --- Document APIs ---
 
   static async getDocuments(
     category?: string,
@@ -40,94 +123,81 @@ export class MedParseApiClient {
     if (search) params.append('search', search);
 
     const queryStr = params.toString() ? `?${params.toString()}` : '';
-    return this.fetchWithFallback<MedicalDocumentRecord[]>(
-      `/api/documents${queryStr}`,
-      { method: 'GET' },
-      MOCK_DOCUMENTS
-    );
+    return this.request<MedicalDocumentRecord[]>(`/api/documents${queryStr}`, { method: 'GET' });
   }
 
   static async getDocumentById(id: string): Promise<MedicalDocumentRecord | null> {
-    const fallback = MOCK_DOCUMENTS.find((d) => d.id === id) || null;
-    return this.fetchWithFallback<MedicalDocumentRecord | null>(
-      `/api/documents/${id}`,
-      { method: 'GET' },
-      fallback
-    );
+    return this.request<MedicalDocumentRecord>(`/api/documents/${id}`, { method: 'GET' });
   }
 
   static async uploadDocument(
     file: File,
-    categoryOverride: DocumentCategory | 'auto'
+    categoryOverride: DocumentCategory | 'auto' = 'auto'
   ): Promise<MedicalDocumentRecord> {
+    const token = this.getToken();
     const formData = new FormData();
     formData.append('file', file);
     formData.append('category_override', categoryOverride);
 
-    try {
-      const res = await fetch(`${BACKEND_API_BASE}/api/documents/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      if (res.ok) {
-        return (await res.json()) as MedicalDocumentRecord;
-      }
-    } catch {
-      // Offline fallback handled in page state
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
 
-    // Fallback record
-    const prefix = categoryOverride !== 'auto' ? categoryOverride.substring(0, 3).toUpperCase() : 'DOC';
-    return {
-      id: `doc-${Date.now()}`,
-      display_id: `${prefix}-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      filename: file.name,
-      file_size_bytes: file.size || 350000,
-      mime_type: file.type || 'application/pdf',
-      category: categoryOverride !== 'auto' ? categoryOverride : 'medical_bill',
-      status: 'needs_review',
-      overall_confidence: 86,
-      upload_timestamp: new Date().toISOString(),
-      last_modified: new Date().toISOString(),
-      facility_name: 'Central District Hospital',
-      patient_id_preview: 'PT-NEW-01',
-      patient_name_preview: 'Awaiting Human Verification',
-      summary_preview: `Ingested ${file.name} · PyMuPDF Stream`,
-      is_synthetic_demo: true,
-      needs_human_review: true,
-      unverified_field_count: 1,
-      ocr_method: file.name.endsWith('.pdf') ? 'direct_pdf_stream' : 'tesseract_ocr',
-      validation_issues: [
-        {
-          id: `val-${Date.now()}`,
-          field: 'Patient Identifier',
-          severity: 'warning',
-          message: 'Optical confidence 86%. Operator review recommended.',
-        },
-      ],
-    };
+    const res = await fetch(`${BACKEND_API_BASE}/api/documents/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (res.status === 401) {
+      this.setToken(null);
+      throw new Error('UNAUTHORIZED');
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Document upload failed' }));
+      throw new Error(err.detail || 'Upload processing failed');
+    }
+
+    return (await res.json()) as MedicalDocumentRecord;
   }
 
-  static async verifyDocument(docId: string): Promise<MedicalDocumentRecord> {
-    const fallback = MOCK_DOCUMENTS.find((d) => d.id === docId) || MOCK_DOCUMENTS[0];
-    return this.fetchWithFallback<MedicalDocumentRecord>(
-      `/api/documents/${docId}/verify`,
-      { method: 'POST' },
-      {
-        ...fallback,
-        status: 'claim_ready',
-        overall_confidence: 100,
-        needs_human_review: false,
-        unverified_field_count: 0,
-      }
-    );
+  static async reprocessDocument(docId: string): Promise<MedicalDocumentRecord> {
+    return this.request<MedicalDocumentRecord>(`/api/documents/${docId}/process`, { method: 'POST' });
+  }
+
+  static async updateDocumentField(
+    docId: string,
+    fieldName: string,
+    value: unknown,
+    isVerified: boolean = true,
+    operator?: string
+  ): Promise<MedicalDocumentRecord> {
+    return this.request<MedicalDocumentRecord>(`/api/documents/${docId}/fields`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field_name: fieldName, value, is_verified: isVerified, operator }),
+    });
+  }
+
+  static async verifyDocument(docId: string, operator?: string): Promise<MedicalDocumentRecord> {
+    const formData = new FormData();
+    if (operator) {
+      formData.append('operator', operator);
+    }
+    return this.request<MedicalDocumentRecord>(`/api/documents/${docId}/verify`, {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  static async deleteDocument(docId: string): Promise<void> {
+    await this.request<{ status: string; message: string }>(`/api/documents/${docId}`, { method: 'DELETE' });
   }
 
   static async getMetrics(): Promise<WorkspaceMetrics> {
-    return this.fetchWithFallback<WorkspaceMetrics>(
-      '/api/metrics',
-      { method: 'GET' },
-      INITIAL_WORKSPACE_METRICS
-    );
+    return this.request<WorkspaceMetrics>('/api/metrics', { method: 'GET' });
   }
 }
+

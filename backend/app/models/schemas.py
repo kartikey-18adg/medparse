@@ -1,14 +1,38 @@
 from typing import List, Optional, Union, Literal, Any, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 
 DocumentCategoryType = Literal["lab_report", "medical_bill", "prescription", "discharge_summary"]
 DocumentStatusType = Literal["processing", "processed", "needs_review", "verified", "claim_ready", "error"]
 ConfidenceLevelType = Literal["high", "medium", "low"]
 
+# --- Authentication Schemas ---
+class UserRegisterRequest(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    role: Optional[str] = "Clinical Operator"
+
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    role: str
+    created_at: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+# --- Clinical Structured Extraction Schemas ---
 class FieldConfidence(BaseModel):
-    value: Any
-    confidence: int = Field(ge=0, le=100)
-    level: ConfidenceLevelType
+    value: Optional[Any] = None
+    confidence: int = Field(default=0, ge=0, le=100)
+    level: ConfidenceLevelType = "low"
     needsReview: bool = False
     isVerified: Optional[bool] = False
     originalValue: Optional[Any] = None
@@ -127,6 +151,7 @@ class AuditLogItem(BaseModel):
 class DocumentRecord(BaseModel):
     id: str
     display_id: str
+    user_id: Optional[str] = None
     filename: str
     file_size_bytes: int
     mime_type: str
@@ -135,11 +160,10 @@ class DocumentRecord(BaseModel):
     overall_confidence: int
     upload_timestamp: str
     last_modified: str
-    facility_name: str
-    patient_id_preview: str
-    patient_name_preview: str
-    summary_preview: str
-    is_synthetic_demo: bool = False
+    facility_name: Optional[str] = None
+    patient_id_preview: Optional[str] = None
+    patient_name_preview: Optional[str] = None
+    summary_preview: Optional[str] = None
     needs_human_review: bool = False
     unverified_field_count: int = 0
     ocr_method: Literal["direct_pdf_stream", "tesseract_ocr", "hybrid_extract"] = "direct_pdf_stream"
@@ -159,4 +183,4 @@ class FieldUpdatePayload(BaseModel):
     field_name: str
     value: Any
     is_verified: bool = True
-    operator: str = "Dr. K. Patel"
+    operator: Optional[str] = "Clinical Operator"

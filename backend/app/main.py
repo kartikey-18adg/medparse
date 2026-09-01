@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import init_db
+from app.api.auth import router as auth_router
 from app.api.documents import router as documents_router
 from app.api.metrics import router as metrics_router
 
@@ -25,6 +26,7 @@ def startup_event():
     init_db()
 
 # Include API routers
+app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(metrics_router)
 
@@ -34,10 +36,11 @@ def root():
         "system": "MedParse Clinical Operations Engine",
         "status": "online",
         "version": "1.0.0",
-        "environment": "demo-mode",
+        "environment": "active",
         "documentation": "/docs"
     }
 
 @app.get("/api/health")
 def health_check():
     return {"status": "healthy", "database": "sqlite_active", "ocr_service": "online"}
+

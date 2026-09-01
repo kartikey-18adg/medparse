@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { MedicalDocumentRecord } from '@/types/document';
+import { useAuth } from '@/context/AuthContext';
 import { CategoryBadge, StatusBadge } from '@/components/ui/StatusBadge';
 import { exportStructuredJson, exportClaimCsv, exportHl7FhirBundle } from './ClaimExporter';
 
@@ -14,9 +15,14 @@ export const ClaimRecordView: React.FC<ClaimRecordViewProps> = ({
   document,
   onReturnToWorkspace,
 }) => {
+  const { user } = useAuth();
+  const operatorName = user ? `${user.full_name} (${user.role})` : 'Clinical Operator';
+
   const handlePrint = () => {
     window.print();
   };
+
+
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F7F5] text-[#1A1917]">
@@ -271,7 +277,7 @@ export const ClaimRecordView: React.FC<ClaimRecordViewProps> = ({
                 HUMAN-IN-THE-LOOP AUDIT CERTIFICATE
               </div>
               <div className="text-xs font-bold text-[#1A1917]">
-                Operator: Dr. K. Patel (Clinical Admin)
+                Operator: {operatorName}
               </div>
               <div className="text-[10px] text-[#5E5D57]">
                 Verified at {new Date().toISOString()}

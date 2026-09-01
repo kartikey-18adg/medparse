@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { AuthModal } from '@/components/auth/AuthModal';
 import { Header } from '@/components/layout/Header';
 import { MetricStrip } from '@/components/dashboard/MetricStrip';
 import { QuickIntakeCard } from '@/components/dashboard/QuickIntakeCard';
@@ -12,13 +14,16 @@ import { ProcessingSequence } from '@/components/intake/ProcessingSequence';
 import { ReviewWorkstation } from '@/components/review/ReviewWorkstation';
 import { ClaimRecordView } from '@/components/claims/ClaimRecordView';
 import { exportConsolidatedClaimsBatch } from '@/components/claims/ClaimExporter';
-import { MOCK_DOCUMENTS, INITIAL_WORKSPACE_METRICS } from '@/data/mockDocuments';
-import { MedicalDocumentRecord, DocumentCategory, DocumentStatus } from '@/types/document';
+import { INITIAL_WORKSPACE_METRICS } from '@/data/mockDocuments';
+import { MedicalDocumentRecord, DocumentCategory, WorkspaceMetrics } from '@/types/document';
 import { MedParseApiClient } from '@/services/apiClient';
 
 export default function MedParseApp() {
-  const [documents, setDocuments] = useState<MedicalDocumentRecord[]>(MOCK_DOCUMENTS);
-  const [metrics, setMetrics] = useState(INITIAL_WORKSPACE_METRICS);
+  const { user, isLoading: isAuthLoading } = useAuth();
+
+  const [documents, setDocuments] = useState<MedicalDocumentRecord[]>([]);
+  const [metrics, setMetrics] = useState<WorkspaceMetrics>(INITIAL_WORKSPACE_METRICS);
+  const [isDataLoading, setIsDataLoading] = useState<boolean>(false);
 
   // Active Screen View: 'workspace' | 'documents' | 'review_queue' | 'review_screen' | 'claim_screen'
   const [currentScreen, setCurrentScreen] = useState<'workspace' | 'documents' | 'review_queue' | 'review_screen' | 'claim_screen'>('workspace');
@@ -55,6 +60,30 @@ export default function MedParseApp() {
       setNotification(null);
     }, 4000);
   };
+
+  // Fetch real data from backend
+  const refreshData = useCallback(async () => {
+    if (!user) return;
+    setIsDataLoading(true);
+    try {
+      const [docsData, metricsData] = await Promise.all([
+        MedParseApiClient.getDocuments(),
+        MedParseApiClient.getMetrics(),
+      ]);
+      setDocuments(docsData);
+      setMetrics(metricsData);
+    } catch (err: unknown) {
+      console.error('Failed to load workspace data:', err);
+    } finally {
+      setIsDataLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      refreshData();
+    }
+  }, [user, refreshData]);
 
   // Live count of documents needing human review
   const needsReviewCount = useMemo(() => {
@@ -100,28 +129,52 @@ export default function MedParseApp() {
       }
       if (searchQuery.trim() !== '') {
         const query = searchQuery.toLowerCase();
-        const matchesId = doc.display_id.toLowerCase().includes(query);
-        const matchesFile = doc.filename.toLowerCase().includes(query);
-        const matchesPatient = doc.patient_name_preview.toLowerCase().includes(query);
-        const matchesPatientId = doc.patient_id_preview.toLowerCase().includes(query);
-        const matchesFacility = doc.facility_name.toLowerCase().includes(query);
+        const matchesId = doc.display_id ? doc.display_id.toLowerCase().includes(query) : false;
+        const matchesFile = doc.filename ? doc.filename.toLowerCase().includes(query) : false;
+        const matchesPatient = doc.patient_name_preview ? doc.patient_name_preview.toLowerCase().includes(query) : false;
+        const matchesPatientId = doc.patient_id_preview ? doc.patient_id_preview.toLowerCase().includes(query) : false;
+        const matchesFacility = doc.facility_name ? doc.facility_name.toLowerCase().includes(query) : false;
         return matchesId || matchesFile || matchesPatient || matchesPatientId || matchesFacility;
       }
       return true;
     });
   }, [documents, selectedCategory, selectedStatus, searchQuery]);
 
-  // Start processing a preset sample
-  const handleProcessPresetSample = (category: DocumentCategory) => {
-    const template = documents.find((d) => d.category === category);
-    if (template) {
-      setProcessingDoc({
-        ...template,
-        id: `doc-${Date.now()}`,
-        display_id: `${category === 'lab_report' ? 'LAB' : category === 'medical_bill' ? 'BILL' : category === 'prescription' ? 'RX' : 'DISC'}-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-        upload_timestamp: new Date().toISOString(),
-        last_modified: new Date().toISOString(),
-      });
+  // Start processing a preset sample by fetching the real static asset and uploading to backend
+  const handleProcessPresetSample = async (category: DocumentCategory) => {
+    const sampleMap: Record<DocumentCategory, { path: string; name: string; type: string }> = {
+      lab_report: {
+        path: '/samples/lab_report_sample.pdf',
+        name: 'lab_report_hematology_pt92831.pdf',
+        type: 'application/pdf',
+      },
+      medical_bill: {
+        path: '/samples/medical_bill_sample.pdf',
+        name: 'itemized_hospital_bill_demo10482.pdf',
+        type: 'application/pdf',
+      },
+      prescription: {
+        path: '/samples/prescription_sample.png',
+        name: 'prescription_dr_ananya_pt84192.png',
+        type: 'image/png',
+      },
+      discharge_summary: {
+        path: '/samples/discharge_summary_sample.pdf',
+        name: 'discharge_summary_pt41908.pdf',
+        type: 'application/pdf',
+      },
+    };
+
+    const target = sampleMap[category];
+    try {
+      showNotification(`Loading real test file: ${target.name}...`);
+      const response = await fetch(target.path);
+      const blob = await response.blob();
+      const file = new File([blob], target.name, { type: target.type });
+      await handleUploadCustomFile(file, category);
+    } catch (err) {
+      console.error('Failed to load preset sample:', err);
+      showNotification('Failed to load sample document.');
     }
   };
 
@@ -130,14 +183,11 @@ export default function MedParseApp() {
     const determinedCategory: DocumentCategory =
       categoryOverride !== 'auto' ? categoryOverride : 'medical_bill';
 
-    const newDocId = `${determinedCategory === 'lab_report' ? 'LAB' : determinedCategory === 'medical_bill' ? 'BILL' : determinedCategory === 'prescription' ? 'RX' : 'DISC'}-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const template = documents.find((d) => d.category === determinedCategory) || documents[0];
+    const tempDocId = `DOC-2026-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const initialPlaceholder: MedicalDocumentRecord = {
-      ...template,
       id: `doc-${Date.now()}`,
-      display_id: newDocId,
+      display_id: tempDocId,
       filename: file.name,
       file_size_bytes: file.size || 350000,
       mime_type: file.type || 'application/pdf',
@@ -146,57 +196,67 @@ export default function MedParseApp() {
       overall_confidence: 86,
       upload_timestamp: new Date().toISOString(),
       last_modified: new Date().toISOString(),
+      facility_name: null,
+      patient_id_preview: null,
+      patient_name_preview: null,
+      summary_preview: `Ingesting ${file.name}...`,
+      needs_human_review: true,
+      unverified_field_count: 1,
       ocr_method: file.name.endsWith('.pdf') ? 'direct_pdf_stream' : 'tesseract_ocr',
+      validation_issues: [],
     };
 
     setProcessingDoc(initialPlaceholder);
 
-    // Call backend API in background
+    // Call real backend API
     try {
       const backendResult = await MedParseApiClient.uploadDocument(file, categoryOverride);
       if (backendResult && backendResult.id) {
         setProcessingDoc(backendResult);
       }
-    } catch {
-      // Fallback handled
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      showNotification(`[ERROR]: ${msg}`);
+      setProcessingDoc(null);
     }
   };
 
-  // Processing sequence completes -> jump straight into Review Workstation
-  const handleProcessingComplete = (completedDoc: MedicalDocumentRecord) => {
-    setDocuments((prev) => [completedDoc, ...prev]);
-    setMetrics((prev) => ({
-      ...prev,
-      documents_today_count: prev.documents_today_count + 1,
-      needs_review_count: prev.needs_review_count + (completedDoc.status === 'needs_review' ? 1 : 0),
-    }));
+  // Processing sequence completes -> refresh list & jump into Review Workstation
+  const handleProcessingComplete = async (completedDoc: MedicalDocumentRecord) => {
+    setDocuments((prev) => [completedDoc, ...prev.filter((d) => d.id !== completedDoc.id)]);
     setProcessingDoc(null);
     setActiveDocument(completedDoc);
     setCurrentScreen('review_screen');
+    await refreshData();
     showNotification(`Document ${completedDoc.display_id} successfully parsed and ready for review.`);
   };
 
   // Save changes from Review Workstation
-  const handleSaveReviewedDocument = (updatedDoc: MedicalDocumentRecord) => {
+  const handleSaveReviewedDocument = async (updatedDoc: MedicalDocumentRecord) => {
     setDocuments((prev) =>
       prev.map((d) => (d.id === updatedDoc.id ? updatedDoc : d))
     );
     setActiveDocument(updatedDoc);
     showNotification(`Saved changes for ${updatedDoc.display_id}.`);
+    await refreshData();
   };
 
   // Human Operator Verifies Record
-  const handleVerifyRecord = (verifiedDoc: MedicalDocumentRecord) => {
-    setDocuments((prev) =>
-      prev.map((d) => (d.id === verifiedDoc.id ? verifiedDoc : d))
-    );
-    setActiveDocument(verifiedDoc);
-    setMetrics((prev) => ({
-      ...prev,
-      verified_count: prev.verified_count + 1,
-      claim_ready_count: prev.claim_ready_count + 1,
-    }));
+  const handleVerifyRecord = async (verifiedDoc: MedicalDocumentRecord) => {
+    try {
+      const result = await MedParseApiClient.verifyDocument(verifiedDoc.id, user?.full_name);
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === result.id ? result : d))
+      );
+      setActiveDocument(result);
+    } catch {
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === verifiedDoc.id ? verifiedDoc : d))
+      );
+      setActiveDocument(verifiedDoc);
+    }
     showNotification(`Document ${verifiedDoc.display_id} verified and marked Claim-Ready.`);
+    await refreshData();
   };
 
   // Jump from Review to Claim Record View
@@ -205,6 +265,23 @@ export default function MedParseApp() {
     setCurrentScreen('claim_screen');
   };
 
+  // If loading auth state
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F7F7F5] font-mono text-xs text-[#5E5D57]">
+        <div className="space-y-2 text-center">
+          <div className="text-sm font-bold text-[#1A1917]">MEDPARSE</div>
+          <div>[INITIALIZING CLINICAL OPERATIONS WORKSPACE...]</div>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated, render institutional Login/Register modal
+  if (!user) {
+    return <AuthModal onSuccess={refreshData} />;
+  }
+
   // RENDER: SCREEN 4 (Review Workstation)
   if (currentScreen === 'review_screen' && activeDocument) {
     return (
@@ -212,7 +289,10 @@ export default function MedParseApp() {
         document={activeDocument}
         onSaveDocument={handleSaveReviewedDocument}
         onVerifyRecord={handleVerifyRecord}
-        onReturnToWorkspace={() => setCurrentScreen('workspace')}
+        onReturnToWorkspace={() => {
+          setCurrentScreen('workspace');
+          refreshData();
+        }}
         onProceedToClaim={handleProceedToClaim}
       />
     );
@@ -223,7 +303,10 @@ export default function MedParseApp() {
     return (
       <ClaimRecordView
         document={activeDocument}
-        onReturnToWorkspace={() => setCurrentScreen('workspace')}
+        onReturnToWorkspace={() => {
+          setCurrentScreen('workspace');
+          refreshData();
+        }}
       />
     );
   }
@@ -252,7 +335,7 @@ export default function MedParseApp() {
         </div>
       )}
 
-      {/* 60-Second Guided Evaluation Strip for Hackathon Judges */}
+      {/* 60-Second Guided Evaluation Strip */}
       {isGuidedTourVisible && currentScreen === 'workspace' && (
         <div className="bg-[#FAF9F5] border-b border-[#E2E0D8] px-4 md:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-[#5E5D57]">
           <div className="flex items-center gap-2">
@@ -290,9 +373,9 @@ export default function MedParseApp() {
           </div>
 
           <div className="flex items-center gap-3 text-[11px] font-mono text-[#5E5D57]">
-            <span>Active Operator: <strong>Dr. K. Patel</strong></span>
+            <span>Active Operator: <strong>{user.full_name}</strong></span>
             <span>·</span>
-            <span>Station: <strong>CDH-OP-04</strong></span>
+            <span>Station: <strong>CDH-OP-{user.id.substring(4, 8).toUpperCase()}</strong></span>
           </div>
         </div>
 
@@ -403,12 +486,12 @@ export default function MedParseApp() {
         <div className="flex items-center gap-2">
           <span className="font-bold text-[#1A1917]">MEDPARSE</span>
           <span>·</span>
-          <span>Prototype designed with privacy-aware data handling.</span>
+          <span>Clinical Operations Engine with SQLite persistence & User Isolation.</span>
         </div>
         <div className="flex items-center gap-4 text-[#89877E]">
           <span>FastAPI / Next.js Hybrid Architecture</span>
           <span>·</span>
-          <span>Local PyMuPDF Stream & OCR Fallback</span>
+          <span>Local PyMuPDF Stream & OCR Pipeline</span>
         </div>
       </footer>
     </div>

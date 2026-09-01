@@ -101,13 +101,15 @@ export const DocumentTable: React.FC<DocumentTableProps> = ({
                 <td className="py-3 px-3">
                   <div className="flex flex-col">
                     <div className="flex items-center gap-1.5 font-medium text-[#1A1917]">
-                      <span>{doc.patient_name_preview}</span>
-                      <span className="text-[11px] font-mono text-[#5E5D57]">
-                        [{doc.patient_id_preview}]
-                      </span>
+                      <span>{doc.patient_name_preview || 'N/A'}</span>
+                      {doc.patient_id_preview && (
+                        <span className="text-[11px] font-mono text-[#5E5D57]">
+                          [{doc.patient_id_preview}]
+                        </span>
+                      )}
                     </div>
                     <span className="text-[11px] text-[#5E5D57] truncate max-w-[200px]">
-                      {doc.facility_name}
+                      {doc.facility_name || 'N/A'}
                     </span>
                   </div>
                 </td>

@@ -1,14 +1,15 @@
 import os
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Depends, status
 from fastapi.responses import JSONResponse, Response
 
 from app.config import UPLOAD_DIR, ALLOWED_EXTENSIONS, MAX_FILE_SIZE_BYTES
 from app.models.schemas import DocumentRecord, FieldUpdatePayload
+from app.services.auth import get_current_user
 from app.db.database import (
     get_all_documents, get_document_by_id, insert_document,
     update_document_extracted_data, mark_document_verified, delete_document_by_id
@@ -25,19 +26,20 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 def list_documents(
     category: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None)
+    search: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
 ):
     """
-    List all clinical records with optional category, status, and text search filters.
+    List all clinical records belonging to current authenticated user.
     """
-    return get_all_documents(category=category, status=status, search=search)
+    return get_all_documents(user_id=current_user["id"], category=category, status=status, search=search)
 
 @router.get("/{doc_id}", response_model=DocumentRecord)
-def get_document(doc_id: str):
+def get_document(doc_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Retrieve single document metadata and structured extraction.
+    Retrieve single document metadata and structured extraction for authenticated user.
     """
-    doc = get_document_by_id(doc_id)
+    doc = get_document_by_id(doc_id, user_id=current_user["id"])
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found.")
     return doc
@@ -45,11 +47,12 @@ def get_document(doc_id: str):
 @router.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    category_override: Optional[str] = Form("auto")
+    category_override: Optional[str] = Form("auto"),
+    current_user: dict = Depends(get_current_user)
 ):
     """
-    Uploads a clinical document (PDF, JPG, PNG), validates file size and type,
-    executes OCR extraction, applies AI schema structuring, and persists record to SQLite.
+    Uploads a clinical document (PDF, JPG, PNG), executes OCR extraction,
+    applies AI schema structuring, and persists record under the authenticated user's account.
     """
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -95,7 +98,14 @@ async def upload_document(
     validation_issues, needs_review = validate_structured_data(detected_category, structured_data)
     overall_conf, unverified_count = compute_overall_confidence(detected_category, structured_data)
 
-    now_iso = datetime.utcnow().isoformat() + "Z"
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    facility_val = structured_data.get("facility", {}).get("value") if structured_data.get("facility") else None
+    if not facility_val and structured_data.get("hospital"):
+        facility_val = structured_data.get("hospital", {}).get("value")
+
+    patient_id_val = structured_data.get("patient_id", {}).get("value") if structured_data.get("patient_id") else None
+    patient_name_val = structured_data.get("patient_name", {}).get("value") if structured_data.get("patient_name") else None
 
     doc_record_data = {
         "id": doc_id,
@@ -108,11 +118,10 @@ async def upload_document(
         "overall_confidence": overall_conf,
         "upload_timestamp": now_iso,
         "last_modified": now_iso,
-        "facility_name": structured_data.get("facility", {}).get("value") or structured_data.get("hospital", {}).get("value") or "Central District Hospital",
-        "patient_id_preview": structured_data.get("patient_id", {}).get("value") or "PT-NEW",
-        "patient_name_preview": structured_data.get("patient_name", {}).get("value") or "Patient Name Pending",
+        "facility_name": facility_val,
+        "patient_id_preview": patient_id_val,
+        "patient_name_preview": patient_name_val,
         "summary_preview": f"{detected_category.replace('_', ' ').title()} · Ingested via {ocr_method}",
-        "is_synthetic_demo": False,
         "needs_human_review": needs_review,
         "unverified_field_count": unverified_count,
         "ocr_method": ocr_method,
@@ -123,18 +132,19 @@ async def upload_document(
     insert_document(
         doc_record_data,
         structured_data,
-        [i.dict() if hasattr(i, "dict") else i for i in validation_issues]
+        [i.dict() if hasattr(i, "dict") else i for i in validation_issues],
+        user_id=current_user["id"]
     )
 
-    created_doc = get_document_by_id(doc_id)
+    created_doc = get_document_by_id(doc_id, user_id=current_user["id"])
     return created_doc
 
 @router.post("/{doc_id}/process")
-def reprocess_document(doc_id: str):
+def reprocess_document(doc_id: str, current_user: dict = Depends(get_current_user)):
     """
     Re-runs the OCR, structuring, and validation pipeline on an existing document.
     """
-    doc = get_document_by_id(doc_id)
+    doc = get_document_by_id(doc_id, user_id=current_user["id"])
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
 
@@ -143,15 +153,15 @@ def reprocess_document(doc_id: str):
     structured_data = extract_structured_entities(category, raw_text, doc.get("filename", ""))
     validation_issues, needs_review = validate_structured_data(category, structured_data)
 
-    update_document_extracted_data(doc_id, structured_data, operator="System Pipeline (Reprocess)")
-    return get_document_by_id(doc_id)
+    update_document_extracted_data(doc_id, user_id=current_user["id"], updated_data=structured_data, operator="System Pipeline (Reprocess)")
+    return get_document_by_id(doc_id, user_id=current_user["id"])
 
 @router.get("/{doc_id}/extraction")
-def get_document_extraction(doc_id: str):
+def get_document_extraction(doc_id: str, current_user: dict = Depends(get_current_user)):
     """
     Retrieve structured JSON extraction payload.
     """
-    doc = get_document_by_id(doc_id)
+    doc = get_document_by_id(doc_id, user_id=current_user["id"])
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
     return {
@@ -163,11 +173,11 @@ def get_document_extraction(doc_id: str):
     }
 
 @router.patch("/{doc_id}/fields")
-def update_extracted_fields(doc_id: str, payload: FieldUpdatePayload):
+def update_extracted_fields(doc_id: str, payload: FieldUpdatePayload, current_user: dict = Depends(get_current_user)):
     """
     Save operator corrections/edits to structured fields.
     """
-    doc = get_document_by_id(doc_id)
+    doc = get_document_by_id(doc_id, user_id=current_user["id"])
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
 
@@ -177,34 +187,40 @@ def update_extracted_fields(doc_id: str, payload: FieldUpdatePayload):
         current_data[payload.field_name]["isVerified"] = payload.is_verified
         current_data[payload.field_name]["needsReview"] = False
 
-    update_document_extracted_data(doc_id, current_data, operator=payload.operator)
-    return get_document_by_id(doc_id)
+    operator_name = payload.operator or current_user.get("full_name") or "Clinical Operator"
+    update_document_extracted_data(doc_id, user_id=current_user["id"], updated_data=current_data, operator=operator_name)
+    return get_document_by_id(doc_id, user_id=current_user["id"])
 
 @router.post("/{doc_id}/verify")
-def verify_document_record(doc_id: str, operator: str = Form("Dr. K. Patel (Clinical Admin)")):
+def verify_document_record(
+    doc_id: str,
+    operator: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Human verification completion: marks record as verified and READY FOR CLAIM.
     """
-    doc = get_document_by_id(doc_id)
+    doc = get_document_by_id(doc_id, user_id=current_user["id"])
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    mark_document_verified(doc_id, operator=operator)
-    return get_document_by_id(doc_id)
+    operator_name = operator or current_user.get("full_name") or "Clinical Operator"
+    mark_document_verified(doc_id, user_id=current_user["id"], operator=operator_name)
+    return get_document_by_id(doc_id, user_id=current_user["id"])
 
 @router.get("/{doc_id}/claim-record")
-def get_claim_record(doc_id: str):
+def get_claim_record(doc_id: str, current_user: dict = Depends(get_current_user)):
     """
     Returns structured claim-ready dataset formatted for hospital claims processing.
     """
-    doc = get_document_by_id(doc_id)
+    doc = get_document_by_id(doc_id, user_id=current_user["id"])
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
 
     return {
         "claim_reference": f"CLM-{doc['display_id']}",
         "status": "READY_FOR_CLAIM",
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "document_metadata": {
             "document_id": doc["display_id"],
             "filename": doc["filename"],
@@ -212,30 +228,30 @@ def get_claim_record(doc_id: str):
             "overall_confidence": doc["overall_confidence"]
         },
         "patient": {
-            "name": doc["patient_name_preview"],
-            "patient_id": doc["patient_id_preview"],
-            "facility": doc["facility_name"]
+            "name": doc["patient_name_preview"] or "N/A",
+            "patient_id": doc["patient_id_preview"] or "N/A",
+            "facility": doc["facility_name"] or "N/A"
         },
         "verified_structured_data": doc["extracted_data"],
         "audit_stamp": {
-            "verified_by": "Dr. K. Patel (Clinical Admin)",
+            "verified_by": current_user.get("full_name") or "Clinical Operator",
             "verification_status": "CERTIFIED"
         }
     }
 
 @router.get("/{doc_id}/export")
-def export_document_data(doc_id: str, format: str = Query("json")):
+def export_document_data(doc_id: str, format: str = Query("json"), current_user: dict = Depends(get_current_user)):
     """
     Export structured dataset in JSON or CSV format.
     """
-    doc = get_document_by_id(doc_id)
+    doc = get_document_by_id(doc_id, user_id=current_user["id"])
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
 
     if format == "csv":
         # Generate itemized CSV
         csv_lines = ["Claim_ID,Document_ID,Category,Patient_Name,Patient_ID,Facility,Date,Service_Or_Parameter,Total_Amount,Status"]
-        row = f"CLM-{doc['display_id']},{doc['display_id']},{doc['category']},\"{doc['patient_name_preview']}\",{doc['patient_id_preview']},\"{doc['facility_name']}\",{doc['upload_timestamp'][:10]},\"{doc['summary_preview']}\",\"{doc['overall_confidence']}%\",READY_FOR_CLAIM"
+        row = f"CLM-{doc['display_id']},{doc['display_id']},{doc['category']},\"{doc['patient_name_preview'] or 'N/A'}\",\"{doc['patient_id_preview'] or 'N/A'}\",\"{doc['facility_name'] or 'N/A'}\",{doc['upload_timestamp'][:10]},\"{doc['summary_preview'] or ''}\",\"{doc['overall_confidence']}%\",READY_FOR_CLAIM"
         csv_lines.append(row)
         csv_data = "\n".join(csv_lines)
         return Response(content=csv_data, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={doc['display_id']}_claim.csv"})
@@ -246,11 +262,12 @@ def export_document_data(doc_id: str, format: str = Query("json")):
     })
 
 @router.delete("/{doc_id}")
-def delete_document(doc_id: str):
+def delete_document(doc_id: str, current_user: dict = Depends(get_current_user)):
     """
     Deletes document record and associated data (Privacy compliance).
     """
-    success = delete_document_by_id(doc_id)
+    success = delete_document_by_id(doc_id, user_id=current_user["id"])
     if not success:
         raise HTTPException(status_code=404, detail="Document not found.")
     return {"status": "success", "message": f"Document '{doc_id}' deleted successfully."}
+
