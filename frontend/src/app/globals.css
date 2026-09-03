@@ -33,7 +33,6 @@
     background-color: var(--bg-workspace);
     color: var(--text-primary);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
-    -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 }
